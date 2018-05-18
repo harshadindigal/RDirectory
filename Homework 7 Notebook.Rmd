@@ -1,0 +1,124 @@
+---
+##Harsha Dindigal
+#Homework 7
+
+title: "R Notebook"
+output: html_notebook
+---
+
+# Instructions
+
+*Total Points For This Assignment: 25 Points*
+
+Before starting this homework assignment, please execute the code below. You will need the **tidyverse**, **readxl**, and **factoextra** packages. We will be working with the **Country Data** that is attached with this assignment. The code below imports the data in the first sheet of this file. This sheet contains standardized data values and we will be using it to perform principal components analysis and *k*-means clustering. Sheets 2 and 3 contain the raw data and detailed descriptions of the variables in the file. Please add your answers to the attached **R Notebook file** and submit this file in Blackboard.
+
+```{r, message = FALSE, warning = FALSE}
+library(tidyverse)
+library(readxl)
+library(factoextra)
+
+# Adjust the path as needed
+# Read in the data
+countries <- read_excel(path = "./Data/country data.xlsx",
+                               sheet = 1) %>% data.frame()
+
+# Add country row names (for plotting)
+rownames(countries) <- abbreviate(countries$Country, 3)
+```
+
+# Problem 1
+## Part (a)
+Use the **prcomp()** function to fit a principal components analysis on the *countries* data set. Remember that the data is already standardized, so set *center* and *scale* to FALSE and exclude the *Country* variable.
+
+```{r}
+coutries_prcomp <-prcomp(countries %>% select(-Country),center = FALSE, scale = FALSE)
+```
+
+## Part (b)
+What proportion of the total variance in the *countries* data do the first two principal components represent?
+
+```{r}
+summary(coutries_prcomp)
+##the first two principal components make up around 67%.
+```
+
+## Part (c)
+Create the Scree plot that is displayed in the instructions PDF file.
+
+```{r}
+fviz_eig(coutries_prcomp) +
+labs(title = "Scree Plot for Countries PCA", x = "Principal Component")
+```
+
+## Part (d)
+Write the code that displays the principal component loadings. Study the loadings on the first two components and use |0.35| as a cut-off value for relationships that are important. This means that any variables with a correlation of 0.35 or greater or -0.35 or less are considered to meaningfully contribute to the component.
+
+The loadings for the first two principal componets, rounded to two decimal places, should be the same as the ones below.
+
+What would you name each of the first two components?
+
+```{r}
+countries_loading <- coutries_prcomp$rotation %>%as.tibble() %>%select(PC1, PC2)
+
+round(countries_loading,2)
+```
+
+## Part (e)
+Create the biplot that is displayed in the instructions PDF file. To get the row names of the *countries* data to display on the plot, use the option *label = "all"*.
+
+```{r}
+fviz_pca_biplot(coutries_prcomp,
+label = "all", 
+axes = c(1,2))
+```
+
+# Problem 2
+Next, we will fit a *k*-means model to the **countries** data. As a first step, produce the plot below to choose a value of *k*. Before you execute the code for your plot, make sure to run **set.seed(314)** so that you get the same results. Remember to exclude the *Country* variable from the data. 
+
+## Part (a)
+
+```{r}
+set.seed(314)
+fviz_nbclust(countries %>% select(-Country),
+FUNcluster = kmeans,
+method = "wss")
+```
+
+## Part (b)
+Use the **kmeans()** function to fit a *k*-means clustering with *k* = 4. Just like part (a), run **set.seed(314)** before you run the **kmean()** function. Set *iter.max* to 20 and *nstart* to 50.
+
+```{r}
+set.seed(314)
+country_kmeans <- kmeans(countries %>% select(-Country), centers = 4,
+iter.max = 20, nstart = 50)
+
+```
+
+## Part (c)
+Re-create the biplot of your PCA analysis from problem 1 and color the points by their cluster value. The cluster vector is stored in your *kmeans* list of results from part (b) as **cluster**. Pass this vector into the *habillage* option of **fviz_pca_biplot**.
+
+```{r}
+fviz_pca_biplot(coutries_prcomp,
+label = "all", 
+axes = c(1,2),
+habillage=country_kmeans$cluster,
+addEllipses=TRUE,
+ellipse.level=0.95)
+
+
+```
+
+## Part (d)
+Use **dplyr** to add the **cluster** labels (stored in your **kmeans** list) to the **countries** data frame and calculate the average of the variables by cluster. You should get the results below.
+
+```{r}
+
+countries %>% mutate(Cluster = country_kmeans$cluster) %>%
+group_by(Cluster) %>%
+summarise_at(2:12, mean)
+
+```
+
+## Part (e)0
+Using the results from part (c) and part(d), how would you describe the countries in each of the four clusters?
+Countries in the blue circle, are the least "worst" countries based off the characteristics given.The purple cluster are countries that are the worst soley on the unemployment characteristic. The orange cluster holds the the highest population between 20-29 countries that are highly urbanized. 

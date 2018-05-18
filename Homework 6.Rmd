@@ -1,0 +1,209 @@
+---
+title: "Homework 6"
+output: html_notebook
+##Harsha Dindigal
+---
+
+**Homework 6 Instructions**
+
+In this homework assignment, we will predict whether a patient will develop heart disease using the Heart Disease data set. Before you begin the assignment, run the code below. This code chunk will import all packages and data needed for this assignment. It also makes the confusion_matrix_results function available in addition to splitting the data into a training and test set. 
+
+You will need the **tidyverse**, **kknn**, **rpart**, **rpart.plot**, and **readxl** packages. We will be working with the **Heart Disease** data set in this assignment. For this assignment, fill in the R code chunks with code that accomplishes the required tasks. Submit this file, with your full name added to it, to Blackboard. 
+
+Remember, to run a code chunk just hit the "play" button. To insert a new chunk, select "Insert" from above and choose "R".
+
+```{r, message = FALSE, warning = FALSE}
+library(tidyverse)
+library(kknn)
+library(rpart)
+library(rpart.plot)
+library(readxl)
+
+# Adjust the path as needed
+heart <- read_excel(path = "./data/Heart Disease.xlsx")
+
+# Recode "HeartDisease" variable for classification
+heart <- heart %>% mutate(HeartDisease = recode_factor(HeartDisease, "No" = "No", "Yes" = "Yes"))
+
+# Turn all other character variables to factors
+heart <- heart %>% mutate_if(is.character, as.factor)
+
+# Split into training and test data
+set.seed(314)
+index_heart <- sample(1:nrow(heart), size = floor(0.7*nrow(heart)))
+heart_training <- heart[index_heart, ]
+heart_test <- heart[-index_heart, ]
+
+# Function for analyzing confusion matrices
+confusion_matrix_results <- function(table_matrix, positive_value) {
+pos_row = which(rownames(table_matrix) == positive_value)
+pos_col = which(colnames(table_matrix) == positive_value)
+TP <- table_matrix[pos_row, pos_col]
+FN <- table_matrix[pos_row, -pos_col]
+FP <- table_matrix[-pos_row, pos_col]
+TN <- table_matrix[-pos_row, -pos_col]
+
+results <- data.frame(correct = c(TN + TP, round((TN + TP)/sum(table_matrix),3)),
+                      misclassified = c(FN + FP, round((FN + FP)/sum(table_matrix),3)),
+                      true_pos = c(TP, round(TP/sum(table_matrix[pos_row,]),3)),
+                      false_neg = c(FN, round(FN/sum(table_matrix[pos_row,]),3)),
+                      true_neg = c(TN, round(TN/sum(table_matrix[-pos_row,]),3)),
+                      false_pos = c(FP, round(FP/sum(table_matrix[-pos_row,]),3)))
+
+rownames(results) <- c("Observations", "Rate")
+return(results) }
+```
+
+**Problem 1 (12 Points)**
+
+For this problem, we will predict **HeartDisease** using **ThalliumStressTest**, **Calcium**, **ChestPain**, **MaxHR**, **RestBP**, **Age**, **Cholesterol**, and **Slope** as predictor variables from the **heart** data set using KNN.
+
+**Part (a) (2 Points)**
+
+Use the **train.kknn** function to find the optimal value of **k**. Use a **kmax** value of 50.
+```{r}
+train.kknn(HeartDisease ~ ThalliumStressTest + Calcium + ChestPain + MaxHR + RestBP + Age + Cholesterol + Slope, data = heart_training, kmax = 50)
+
+```
+
+
+**Part (b) (2 Points)**
+
+Fit the KNN model using the optimal **k** from part (a). Create a results data frame using the test data. Add the default predicted response values (at a 0.5 cut-off) and the estimated posterior probabilities for "Yes" and "No".
+
+```{r}
+knn_Optimal_HeartDiases <- kknn(HeartDisease ~ ThalliumStressTest + Calcium + ChestPain + MaxHR + RestBP + Age + Cholesterol + Slope, train = heart_training, test = heart_test, k = 20, distance = 2)
+
+knn_results_HeartDiases <- data.frame(heart_test, knn_pred = knn_Optimal_HeartDiases$fitted.values,knn_Optimal_HeartDiases$prob)
+
+```
+
+**Part (c) (6 Points)**
+
+Write a for loop that calculates the misclassification and false negative rates for each cut_off value in the **cut_off_results_knn** data frame that I have created below.
+
+If you did this correctly, then the **misclass_rate** and **false_neg_rate** values should be 0.2555556 and 0.04255319 for the 6th row in **cut_off_results_knn** (corresponding to a cut_off value of 0.125).
+
+```{r}
+# Adjusting the Cut-Off Value to Minimize Misclassification and False Negative Rates
+# Vector of cut-off values of interest
+cut_off <- seq(from = 0, to = 1, by = 0.025)
+
+# Create data frame for results
+cut_off_results_knn <- data.frame(cut_off,
+                                  misclass_rate = numeric(length = length(cut_off)),
+                                  false_neg_rate = numeric(length = length(cut_off)))
+
+for(row in 1:nrow(cut_off_results_knn)) {
+  predictions <- ifelse(knn_results_HeartDiases$Yes >= cut_off_results_knn[row,"cut_off"], "Yes", "No")
+  cut_off_results_knn[row,"misclass_rate"] <- sum(!(knn_results_HeartDiases$default = predictions))/nrow(knn_results_HeartDiases)
+cut_off_results_knn[row,"false_neg_rate"] <- sum((knn_results_HeartDiases$default == "Yes" & predictions == "No" ))/sum(knn_results_HeartDiases$default == "Yes")
+}
+
+```
+
+
+**Part (d) (2 Points)**
+
+Choose a cut-off probability that you think works best for this data set based on your results from part (c). Add predictions based on this cut-off probability to your data frame with the model results from part (b) and then create a confusion matrix using the best cut-off probability. Finally, use the **confusion_matrix_results** function to produce a summary of your final model.
+
+```{r}
+knn_heart_results <- knn_heart_results %>%
+mutate(knn_pred_0.025 = ifelse(Yes >= 0.025, "Yes", "No"))
+knn_confusion_0.025 <- table(knn_heart_results$HeartDisease, 
+knn_heart_results$knn_pred_0.025)
+confusion_matrix_results(knn_confusion_0.025, "Yes")
+
+```
+
+**Problem 2 (15 Points)**
+
+For this problem, we will predict **HeartDisease** using **ThalliumStressTest**, **Calcium**, **ChestPain**, **MaxHR**, **RestBP**, **Age**, **Cholesterol**, and **Slope** as predictor variables from the **heart** data set using a decision tree fit with **rpart**.
+
+**Part (a) (1 Point)**
+
+Build a large tree on the training data with a low complexity parameter (cp). I have added *set.seed(314)* to the code chunk so that everyone gets the same answer. Use all the predictor variables that I listed above to fit this large training tree and a cp and minbucket value of 0 and 4, respectively.
+
+```{r}
+set.seed(314)
+heart <- heart %>% mutate_if(is.character, as.factor) 
+index_heart <- sample(x = 1:nrow(mpg), size = floor(0.7*nrow(heart)))
+heart_training <- heart[index_heart, ] 
+heart_test <- heart[-index_heart, ]
+
+training_tree <- rpart(HeartDisease ~ ThalliumStressTest+Calcium+ChestPain+MaxHR+RestBP+Age+Cholesterol+Slope, data = heart_training,
+method = "anova",
+control = rpart.control(cp = 0, minbucket = 4))
+
+```
+
+**Part (b) (2 Points)**
+
+Find the best cp value based on cross validation results using the printcp() function.
+
+```{r}
+printcp(training_tree)
+
+```
+
+
+**Part (c) (1 Points)**
+
+Prune the large tree using the optimal cp value from part (b).
+
+```{r}
+
+final_tree <- prune(training_tree, cp = 0.0239)
+```
+
+
+**Part (d) (1 Points)**
+
+Visualize your pruned tree model with **rpart.plot**.
+
+```{r}
+
+rpart.plot(final_tree, type = 4, digits = -3, box.palette="GnBu",
+branch.lty=3, branch.lwd = 3,
+shadow.col="gray", gap = 0, tweak = 1.1)
+```
+
+
+**Part (e) (2 Points)**
+
+Create a results data frame using the test data. Add the estimated posterior probabilities for "Yes" and "No".
+
+```{r}
+
+
+```
+
+**Part (f) (6 Points)**
+
+Write a for loop that calculates the misclassification and false negative rates for each cut_off value in the **cut_off_results_tree** data frame that I have created below.
+
+If you did this correctly, then the **misclass_rate** and **false_neg_rate** values should be 0.4777778 and 0 for the 4th row in **cut_off_results_tree** (corresponding to a cut_off value of 0.075).
+
+```{r}
+# Adjusting the Cut-Off Value to Minimize Misclassification and False Negative Rates
+# Vector of cut-off values of interest
+cut_off <- seq(from = 0, to = 1, by = 0.025)
+
+# Create data frame for results
+cut_off_results_tree <- data.frame(cut_off,
+                                   misclass_rate = numeric(length = length(cut_off)),
+                                   false_neg_rate = numeric(length = length(cut_off)))
+
+
+
+```
+
+**Part (g) (2 Points)**
+
+Choose a cut-off probability that you think works best for this data set based on your results from part (f). Add predictions based on this cut-off probability to your data frame with the model results from part (e) and then create a confusion matrix using the best cut-off probability. Finally, use the **confusion_matrix_results** function to produce a summary of your final model.
+
+```{r}
+
+
+```
+
