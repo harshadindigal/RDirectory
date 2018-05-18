@@ -1,0 +1,381 @@
+---
+title: "MIS 431 Final Project"
+---
+
+**MIS 431 Final Project : Harsha Dindigal*
+
+```{r}
+# Add all library you will need here
+library(MASS)
+library(tidyverse)
+library(e1071)
+library(readxl)
+library(ISLR)
+library(rpart)
+#install.packages("rpart.plot")
+#install.packages("rpart")
+library(rpart.plot)
+library(ggplot2)
+library(broom)
+install.packages("kknn")
+library(kknn)
+
+# Adjust the path to your file location
+dulles <- read_excel("R Directory/Data/Washington Dulles Domestic 2016.xlsx")
+
+# Recode character variables into factors
+dulles <- dulles %>% mutate_if(is.character, as.factor)
+
+# Create training and test data
+set.seed(314)
+train_index <- sample(1:nrow(dulles), floor(0.7*nrow(dulles)))
+
+# training
+dulles_training <- dulles[train_index, ]
+
+# test
+dulles_test <- dulles[-train_index, ]
+
+# Function for analyzing confusion matrices
+confusion_matrix_results <- function(table_matrix, positive_value) {
+pos_row = which(rownames(table_matrix) == positive_value)
+pos_col = which(colnames(table_matrix) == positive_value)
+TP <- table_matrix[pos_row, pos_col]
+FN <- table_matrix[pos_row, -pos_col]
+FP <- table_matrix[-pos_row, pos_col]
+TN <- table_matrix[-pos_row, -pos_col]
+results <- data.frame(correct = c(TN + TP, round((TN + TP)/sum(table_matrix),3)),
+misclassified = c(FN + FP, round((FN + FP)/sum(table_matrix),3)),
+true_pos = c(TP, round(TP/sum(table_matrix[pos_row,]),3)),
+false_neg = c(FN, round(FN/sum(table_matrix[pos_row,]),3)),
+true_neg = c(TN, round(TN/sum(table_matrix[-pos_row,]),3)),
+false_pos = c(FP, round(FP/sum(table_matrix[-pos_row,]),3)))
+rownames(results) <- c("Observations", "Rate")
+return(results) }
+```
+
+**Exporatory Data Analysis Section**
+
+1.)Are there particular months that experience a larger proportion of overall flight delays?
+
+The later half of 2016 experienced the largest number of delayed flights. In the month of December, 36% of all outbound flights experienced a delay in scheduled gate-to-gate flight time.
+
+```{r}
+#The following code creates a table of month, no-delay count, yes-delay count, and delay rate and orders the table based on a descendin delay rate.
+
+dulles %>% group_by(month_text, overall_delay) %>% 
+           summarise(flights = n()) %>% 
+           spread(key = "overall_delay", value = "flights") %>% 
+           mutate(delay_rate = Yes/(No + Yes)) %>% 
+           arrange(desc(delay_rate))
+
+#The following sensitivy box plot plots each month and respectivley fills the box lighter or darker blue based on the delay rate. Orientation for interpretation is included.
+
+ggplot(dulles %>% group_by(month_text, overall_delay) %>% 
+           summarise(flights = n()) %>% 
+           spread(key = "overall_delay", value = "flights") %>% 
+           mutate(delay_rate = Yes/(No + Yes)) ,aes(x = month_text, fill = delay_rate)) + geom_bar() + theme(axis.text=element_text(size=4),axis.title=element_text(size=8,face="plain"))
+```
+
+2.)Are there certain airlines that experience a larger proportion of overall flight delays?
+
+Frontier Airlines was the only airline to experience a delay rate higher than 30% (30.7%), followed by  JetBlue Airways with 28% and American Airlines with 24% of their respective flight delayed. Overall, 60% of airlines have a 20% or greater delay-rate flying out of Washinton IAD. 
+```{r}
+#The following code creates a table of airline name, no-delay count, yes-delay count, and delay rate and orders the table based on a descendin delay rate.
+
+dulles %>% group_by(airline_name, overall_delay) %>% 
+           summarise(flights = n()) %>% 
+           spread(key = "overall_delay", value = "flights") %>% 
+           mutate(delay_rate = Yes/(No + Yes)) %>% 
+           arrange(desc(delay_rate))
+
+ #The following sensitivy box plot plots airlines with delay rates greater than 20% and respectivley fills the box lighter or darker blue based on the delay rate. Orientation for interpretation is included.
+
+ggplot(dulles %>% group_by(airline_name, overall_delay) %>% 
+           summarise(flights = n())%>%spread(key = "overall_delay", value = "flights")%>%mutate(delay_rate = Yes/(No + Yes))%>%filter(delay_rate>.20),aes(x = airline_name, fill = delay_rate)) + geom_bar() + theme(axis.text=element_text(size=4),axis.title=element_text(size=8,face="plain"))
+
+
+```
+
+3.)Does flight length have any influence on the overall delay?
+
+Interestingly enough, the distance of the flight has nothing to do with flight delays. However, something is uncovered here, the two most popular distances have the highest delay rates. In other words, flights with the distance 1817-2817 miles and 187-1817 miles had signifacntly more flights, however the delay rates within those buckets were not significantly greater than the extremley long and less traveled flights. No strong relationship can be determined from flight length that influences overall flight delays.
+
+```{r}
+#The following code creates a variable by seperating flight distances into buckets and the appropriate flight miles are placed into their respective buckets
+
+dulles$distancecut <-
+
+#The following table shows flights organized by their ditance bucket, their no-delay count, yes-delay count, and delay rate
+
+dulles %>% group_by(distancecut, overall_delay) %>% 
+           summarise(flights = n()) %>% 
+           spread(key = "overall_delay", value = "flights") %>% 
+           mutate(delay_rate = Yes/(No + Yes)) %>% 
+           arrange(desc(delay_rate))
+
+#The following sensitivy box plot different flight ditance buckets and respectivley fills the box lighter or darker blue based on the corresponding delay rate. Orientation for interpretation is included.
+
+ggplot(dulles%>% group_by(distancecut, overall_delay) %>%summarise(flights = n()) %>%spread(key = "overall_delay", value = "flights") %>%mutate(delay_rate = Yes/(No + Yes)), aes(x = distancecut,fill= delay_rate)) + geom_bar()+theme(axis.text=element_text(size=4),axis.title=element_text(size=8,face="plain"))
+```
+4.)Does day of the week influence overall flight delay rates?
+
+After careful analysis, weekdays, on average, have a higher delay rate than weekends. Overall, delay rates fall +- 3% of 19% across the week, therefore there is not a significant discrepency, however data shows that the two lowest flight delays occur on the weekend.
+
+```{r}
+#The following table shows days of the week, their no-day count, yes-delay count, and delay rate
+
+dulles %>% group_by(day_text, overall_delay) %>% 
+           summarise(flights = n()) %>% 
+           spread(key = "overall_delay", value = "flights") %>% 
+           mutate(delay_rate = Yes/(No + Yes)) %>% 
+           arrange(desc(delay_rate))
+#The following sensitivy box plot shows the different days of the week and respectivley fills the box lighter or darker blue based on the corresponding delay rate. Orientation for interpretation is included.
+
+ggplot(dulles %>% group_by(day_text, overall_delay) %>% 
+           summarise(flights = n()) %>% 
+           spread(key = "overall_delay", value = "flights") %>% 
+           mutate(delay_rate = Yes/(No + Yes)) ,aes(x = day_text, fill = delay_rate)) + geom_bar() + theme(axis.text=element_text(size=4),axis.title=element_text(size=8,face="plain"))
+```
+5.)Do certain airport destinations have higher delay rates?
+
+After careful analysis, Newark Liberty International has an alarming delay rate of 40%, followed by Miami International with a 32.3% delay rate and Los Angeles International Airport  with a 26.4% delay rate.
+
+
+```{r}
+#The following table shows airports that recieve at-least 10 flights from Washinton IAD, their no-day count, yes-delay count, and delay rate
+dulles %>% group_by(dest_airport_name, overall_delay) %>%
+           summarise(flights = n()) %>%filter(flights > 10)%>% 
+           spread(key = "overall_delay", value = "flights") %>% 
+           mutate(delay_rate = Yes/(No + Yes)) %>% 
+           arrange(desc(delay_rate))
+
+#The following sensitivy box plot shows airports that experience a 20% delay rate or higher and also recieves 10+ flights from Washington IAD. Moreover, the plot respectivley fills the box lighter or darker blue based on the corresponding delay rate. Orientation for interpretation is included.
+
+ggplot(dulles %>% group_by(dest_airport_name, overall_delay) %>% 
+           summarise(flights = n())%>%filter(flights>10)%>%spread(key = "overall_delay", value = "flights")%>%mutate(delay_rate = Yes/(No + Yes))%>%filter(delay_rate>=.200),aes(x = dest_airport_name, fill = delay_rate)) + geom_bar() + theme(axis.text=element_text(size=3),axis.title=element_text(size=8,face="bold"))
+
+
+```
+6.) What regions experience the highest delay rate? 
+Overall, although the West coast has the largest amount of flights going to its airports, it has the second highest delay rate. The highest delay rate occurs in the North East, with  23.7% of flights going to the region being delayed.
+```{r}
+#The following table shows destination airport regions from Washington IAD D, their no-delay count, yes-delay count, and delay rate
+
+dulles %>% group_by(dest_airport_us_region, overall_delay) %>%
+           summarise(flights = n()) %>% 
+           spread(key = "overall_delay", value = "flights") %>% 
+           mutate(delay_rate = Yes/(No + Yes)) %>% 
+           arrange(desc(delay_rate))
+```
+7.) Which states's airports have the highest delay rates?
+
+New Jersey has an unusually high delay rate of 40%, followed by New York destinations delayed at 26.3% and Arizona arrivals delayed at 21.9%.
+
+```{r}
+#The following table shows destination airport states that recieve at-least 10 flights from Washignton IAD, its No-Delay count, Yes-Delay count, and its effectictive delay rate. 
+
+dulles %>% group_by(dest_airport_state, overall_delay) %>%
+           summarise(flights = n()) %>%filter(flights > 10)%>%
+           spread(key = "overall_delay", value = "flights") %>% 
+           mutate(delay_rate = Yes/(No + Yes)) %>% 
+           arrange(desc(delay_rate))
+```
+
+
+8.) Which airports have the longest delays? Which airports have the earliest flights (quicker than expected arrivals)?
+After careful analysis, on average, St. Louis Lambert International poses the longest delays as an arrival destination from Washington Dulles International with an average delay of 21 minutes. On the other end, Charleston AFB-Intl, on average, has a 28 minute shorter than expected flight time. 
+
+```{r}
+#The following shows airports organized by their average delay time for flights from  Washington IAD.Lower elapsed time than scheduled are considered negative.
+
+dulles%>% group_by(dest_airport_name) %>%summarise(avgdelay = mean(overall_delay_min))%>%arrange(desc(avgdelay))
+
+```
+
+**Regression Modeling: Predicting Overall Flight Delays in Minutes**
+
+```{r}
+#The following is a Multiple Linear Regression Analysis
+#Model of All Predictor Variables 
+delay_mins_allvrs <- lm(overall_delay_min ~ month_text + distance + sch_dep_hour + sch_arr_hour + dep_delay_min + taxi_out, data = dulles)
+summary(delay_mins_allvrs)
+coef(delay_mins_allvrs)
+
+#Which variables being taken out better predict delay_mins?
+
+#Everything but dep_delay_min
+reduced_model<- lm(overall_delay_min ~ month_text + distance + sch_dep_hour + sch_arr_hour + taxi_out, data = dulles)
+#Everything but taxi_out
+reduced_model1<- lm(overall_delay_min ~ month_text + distance + sch_dep_hour + sch_arr_hour + dep_delay_min , data = dulles)
+#Everything but schedule departure hour
+reduced_model2<- lm(overall_delay_min ~ month_text + distance + sch_arr_hour + dep_delay_min + taxi_out, data = dulles)
+#Everything but schedule arrival hour
+reduced_model3<- lm(overall_delay_min ~ month_text + distance + sch_dep_hour + dep_delay_min + taxi_out, data = dulles)
+
+summary(reduced_model)
+summary(reduced_model1)
+summary(reduced_model2)
+summary(reduced_model3)
+
+
+anova(reduced_model, delay_mins_allvrs)
+anova(reduced_model1, delay_mins_allvrs)
+anova(reduced_model2, delay_mins_allvrs)
+anova(reduced_model3, delay_mins_allvrs)
+
+#Residual Plot (Residuals vs Fitted)
+simple_augment_results <- augment(delay_mins_allvrs)
+ggplot(data = simple_augment_results, mapping = aes(x = .fitted, y = .resid)) +
+geom_point(color = "#006EA1") +
+geom_hline(yintercept = 0, color = "black") +
+labs(title = "Residual Scatter Plot for Simple Linear Fit",
+y = "Residual",
+x = "Predicted Delay in Minutes") +
+theme_light()
+
+#Predicted vs Actual (Using month_text, distance, sch_dep_hour, sch_arr_hour, dep_delay_min, and taxi_out)
+
+ggplot(data = simple_augment_results, mapping = aes(x = dulles$overall_delay_min , y = .fitted)) +
+geom_point(color = "#006EA1", size = 2) +
+geom_abline(slope = 1, intercept = 0, color = "orange", size = 1.2) +
+labs(title = "Predicted Delay (Using Month, Distance, Schedule Departure Hour, Arrival Hour, Departure Delay, and Taxi Out) vs Actual",
+x = "Actual Delay Value",
+y = "Predicted Delay Value") +
+theme_light()
+
+#Plotting R^2 of all models
+str(summary(delay_mins_allvrs))
+a <- as.numeric(summary(delay_mins_allvrs)$r.squared)
+b <- as.numeric(summary(reduced_model)$r.squared)
+c <- as.numeric(summary(reduced_model1)$r.squared)
+d <- as.numeric(summary(reduced_model2)$r.squared)
+e <- as.numeric(summary(reduced_model3)$r.squared)
+r_values <- c(a,b,c,d,e)
+x_label <- c("Full Model","No Departure Delay", "No Taxi Out", "No Schedule Departure Hour", "No Schedule Arrival Hour")
+
+
+plot(factor(x_label),r_values, cex.axis = 0.5, ylab = "R^2 values")
+
+##The following is a KNN Analysis for Regression
+train.kknn(overall_delay_min ~ month_text + distance + sch_dep_hour + sch_arr_hour + 
+                            dep_delay_min + taxi_out,
+                            data = dulles,
+                            kmax = 40)
+
+dulles_min_knn_optimal <-kknn(overall_delay_min ~ month_text + distance + sch_dep_hour + sch_arr_hour + 
+                            dep_delay_min + taxi_out, 
+                     train = dulles_training, 
+                     test = dulles_test,
+                     k = 27, distance = 2)
+
+dulles_min_knn_optimal_2 <- dulles_test %>% select(overall_delay_min, month_text, distance,
+                                                   sch_dep_hour,sch_arr_hour,dep_delay_min,taxi_out) %>%
+                                                   mutate(dulles_min_optimal_pred =
+                                                          dulles_min_knn_optimal$fitted.values)
+
+cor(dulles_min_knn_optimal_2$overall_delay_min, dulles_min_knn_optimal_2$dulles_min_optimal_pred)^2
+
+ggplot(data = dulles_min_knn_optimal_2, mapping = aes(x = overall_delay_min, y = dulles_min_optimal_pred)) +
+geom_point(color = "#006EA1", size = 2) +
+geom_abline(slope = 1, intercept = 0, color = "orange", size = 1.2) +
+labs(title = "Predicted vs Actual hwy on Test Data, KNN with k = 27, 4 predictors",
+x = "Actual Delay Value",
+y = "Predicted Delay Value") +
+theme_light()
+
+
+``` 
+
+**Classification: Predicting Overall Flight Delay - Yes or No**
+
+```{r}
+##Decision Tree Classification Analysis
+set.seed(314)
+telco_training_tree <- rpart(overall_delay~month_text + distance + sch_dep_hour + sch_arr_hour + dep_delay_min + taxi_out, data = dulles,
+method = "class",
+control = rpart.control(cp = 0, minbucket = 4))
+cp_results <- telco_training_tree$cptable
+round(cp_results,4)
+telco_final_tree <- prune(telco_training_tree, cp = 0.0071)
+
+rpart.plot(telco_final_tree, type = 4, extra = 103, digits = -3,
+box.palette="GnBu",
+branch.lty=3, branch.lwd = 3,
+shadow.col="gray", gap = 0, tweak = 1.0)
+
+telco_tree_results <- data.frame(dulles_test,
+predict(telco_final_tree,
+newdata = dulles_test,
+type = "prob"))
+
+telco_tree_results <- telco_tree_results %>%
+mutate(tree_predicted_0.5 = ifelse(Yes >= 0.5, "Yes", "No"))
+
+telco_confusion <- table(telco_tree_results$overall_delay, # Actual response values
+telco_tree_results$tree_predicted_0.5) # Predicted
+
+confusion_matrix_results(telco_confusion, "Yes")
+
+#Explore Different Cutoff Results
+# Vector of cut-off values of interest
+cut_off <- seq(from = 0, to = 1, by = 0.025)
+
+# Create data frame for results
+cut_off_results_telco <- data.frame(cut_off,
+misclass_rate = numeric(length = length(cut_off)),
+false_neg_rate = numeric(length = length(cut_off)))
+for (row in 1:nrow(cut_off_results_telco)) {
+
+# Calculate new predictions
+predictions <- ifelse(telco_tree_results$Yes >=
+cut_off_results_telco[row, "cut_off"], "Yes", "No")
+
+# Add results to cut_off_results_telco data frame
+cut_off_results_telco[row,"misclass_rate"] <-
+sum(!(telco_tree_results$overall_delay == predictions))/
+nrow(telco_tree_results)
+cut_off_results_telco[row,"false_neg_rate"] <-
+sum((telco_tree_results$overall_delay == "Yes" & predictions == "No"))/
+sum(telco_tree_results$overall_delay == "Yes")
+} # end of for() loop
+
+cut_off_results_telco %>% slice(1:10)
+
+telco_tree_results <- telco_tree_results %>%mutate(tree_predicted_0.2 = ifelse(Yes >= 0.2, "Yes", "No"))
+telco_confusion_0.2 <- table(telco_tree_results$overall_delay, # Actual response values
+telco_tree_results$tree_predicted_0.2) # Predicted
+# Default cut-off
+confusion_matrix_results(telco_confusion, "Yes")
+
+# Cut-off at 0.2
+confusion_matrix_results(telco_confusion_0.2, "Yes")
+
+##The following code is KKN Classifcation Analysis
+train.kknn(overall_delay ~ month_text + distance + sch_dep_hour + sch_arr_hour + 
+                            dep_delay_min + taxi_out,
+                            data = dulles_training,
+                            kmax = 40)
+
+dulles_overall_knn_optimal <-kknn(overall_delay ~ month_text + distance + sch_dep_hour + sch_arr_hour + 
+                            dep_delay_min + taxi_out, 
+                     train = dulles_training, 
+                     test = dulles_test,
+                     k = 25, distance = 2)
+
+dulles_overall_knn_results <- data.frame(dulles_test,
+                          knn_pred = dulles_overall_knn_optimal$fitted.values,
+                          dulles_overall_knn_optimal$prob)
+
+dulles_overall_knn_confusion <- table(dulles_overall_knn_results$overall_delay,
+                                     dulles_overall_knn_results$knn_pred)
+
+confusion_matrix_results(dulles_overall_knn_confusion, "Yes")
+
+```
+
+
+
+
+
+
